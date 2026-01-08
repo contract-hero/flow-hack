@@ -1,4 +1,5 @@
-import NFTPoolInterface, NFTFactory
+import "NFTPoolInterface"
+import "NFTFactory"
 
 access(all) contract NFTPoolInstance0: NFTPoolInterface {
 
@@ -13,7 +14,7 @@ access(all) contract NFTPoolInstance0: NFTPoolInterface {
         }
     }
 
-    init(resource: @NFTFactory.ResourceWrapper) {
-        self.resourcePool <- [<- resource]
+    init(argResource: @NFTFactory.ResourceWrapper) {
+        self.resourcePool <- [<- argResource]
     }
 }

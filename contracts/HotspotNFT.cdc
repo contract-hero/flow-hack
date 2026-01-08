@@ -1,4 +1,4 @@
-import FungibleToken
+import "FungibleToken"
 
 access(all) contract HotspotNFT {
 

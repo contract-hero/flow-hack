@@ -36,8 +36,8 @@ access(all) contract NFTFactory {
             return <- self.resource.removeFirst()
         }
 
-        init(resource: @AnyResource) {
-            self.resource <- [<- resource]
+        init(argResource: @AnyResource) {
+            self.resource <- [<- argResource]
         }
     }
 
@@ -45,7 +45,7 @@ access(all) contract NFTFactory {
         access(all) var rawValue: @ResourceWrapper
 
         access(all) fun getWrapper(): @ResourceWrapper {
-            var tempWrapper <- create ResourceWrapper(resource: <- [])
+            var tempWrapper <- create ResourceWrapper(argResource: <- [])
             self.rawValue <-> tempWrapper
             return <- tempWrapper
         }
@@ -55,8 +55,8 @@ access(all) contract NFTFactory {
         }
     }
 
-    access(all) fun wrapResource(resource: @AnyResource): @ResourceWrapper {
-        return <- create ResourceWrapper(resource: <- resource)
+    access(all) fun wrapResource(argResource: @AnyResource): @ResourceWrapper {
+        return <- create ResourceWrapper(argResource: <- argResource)
     }
 
     access(all) fun createManager(wrapper: @ResourceWrapper): @ResourceManager {

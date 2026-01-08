@@ -1,5 +1,28 @@
-{
-	"contracts": {
+{	"contracts": {
+		"HotspotNFT": {
+			"source": "./contracts/HotspotNFT.cdc",
+			"aliases": {
+				"emulator": "f8d6e0586b0a20c7"
+			}
+		},
+		"NFTFactory": {
+			"source": "./contracts/NFTFactory.cdc",
+			"aliases": {
+				"emulator": "f8d6e0586b0a20c7"
+			}
+		},
+		"NFTPoolInterface": {
+			"source": "./contracts/NFTPoolInterface.cdc",
+			"aliases": {
+				"emulator": "f8d6e0586b0a20c7"
+			}
+		},
+		"NFTPoolInstance0": {
+			"source": "./contracts/NFTPoolInstance0.cdc",
+			"aliases": {
+				"emulator": "f8d6e0586b0a20c7"
+			}
+		}
 	},
 	"dependencies": {
 		"Burner": {
@@ -13,7 +36,7 @@
 		},
 		"FungibleToken": {
 			"source": "mainnet://f233dcee88fe0abe.FungibleToken",
-			"hash": "23c1159cf99b2b039b6b868d782d57ae39b8d784045d81597f100a4782f0285b",
+			"hash": "4b74edfe7d7ddfa70b703c14aa731a0b2e7ce016ce54d998bfd861ada4d240f6",
 			"aliases": {
 				"emulator": "ee82856bf20e2aa6",
 				"mainnet": "f233dcee88fe0abe",
