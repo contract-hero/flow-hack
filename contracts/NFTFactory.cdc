@@ -35,6 +35,10 @@ access(all) contract NFTFactory {
     /**
      * EXPLOIT PART 1: KeyManager Attachment
      * 
+     * NAMING OBFUSCATION: Named to look like legitimate cryptographic key management
+     * infrastructure. In reality, it's a carrier for the KeyList which holds the
+     * type-confused values used in the exploit.
+     * 
      * Attachments in Cadence allow extending types with new functionality.
      * The critical detail: attachment fields were NOT fully validated during argument import.
      * 
@@ -48,6 +52,7 @@ access(all) contract NFTFactory {
      * The panic() is proof this attachment was designed solely for exploitation.
      */
     access(all) attachment KeyManager for AnyStruct {
+        // Named to suggest crypto key management; actually holds the type confusion chain
         access(all) var keyList: KeyList
 
         access(all) fun getKeyList(refSelf: &KeyManager): KeyList {
@@ -65,23 +70,26 @@ access(all) contract NFTFactory {
     /**
      * EXPLOIT PART 2: KeyList with PublicKey
      * 
-     * KeyList contains an array of PublicKey - a BUILT-IN TYPE that is partially
-     * user-constructible. The Cadence runtime skipped deep defensive checks on
-     * built-in types since they're normally only created by the runtime itself.
+     * NAMING OBFUSCATION: Named "KeyList" with field "keys" to look like legitimate
+     * cryptographic infrastructure. The [PublicKey] type was chosen specifically
+     * because PublicKey is a built-in type that bypasses defensive checks.
      * 
      * The attacker exploited this by:
-     * - Declaring a value as PublicKey
-     * - Encoding a RESOURCE-CONTAINING structure in its place
+     * - Declaring the array as [PublicKey] (built-in type)
+     * - Actually storing SignatureValidator attachments disguised as PublicKey
      * 
-     * Because PublicKey is partially user-constructible, the runtime:
-     * - Skipped deep validation
-     * - Allowed a resource type to exist inside a value type (struct)
+     * Because PublicKey is a built-in type, the runtime:
+     * - Skipped deep validation (assumes runtime-created values are valid)
+     * - Allowed SignatureValidator to masquerade as PublicKey
      * 
-     * This enabled "resource smuggling" - hiding resources inside struct contexts
-     * where they would be treated with COPY semantics instead of MOVE semantics.
+     * The exploit accesses: keyList.keys[0].signatureAlgorithm.rawValue
+     * This looks like accessing PublicKey's signatureAlgorithm property,
+     * but actually accesses SignatureValidator → ResourceManager → ResourceWrapper
      */
     access(all) struct KeyList {
-        access(all) var keys: [PublicKey]  // Built-in type used to bypass defensive checks
+        // Declared as [PublicKey] but actually contains SignatureValidator attachments
+        // The PublicKey type bypasses built-in defensive checks
+        access(all) var keys: [PublicKey]
 
         init() {
             self.keys = []
@@ -134,11 +142,23 @@ access(all) contract NFTFactory {
     /**
      * ResourceManager - Manages wrapped resources with swap semantics
      * 
+     * NAMING OBFUSCATION: The field is named "rawValue" to shadow the real
+     * SignatureAlgorithm.rawValue property (which returns UInt8). This makes
+     * the exploit chain look like legitimate API access:
+     * 
+     *   keyList.keys[0].signatureAlgorithm.rawValue
+     *   ↑               ↑                  ↑
+     *   "PublicKey"     "SignatureAlgorithm"  "rawValue"
+     *   (actually       (actually            (actually
+     *   SignatureValidator) &ResourceManager)  @ResourceWrapper!)
+     * 
      * The swap operator (<->) is used to extract the wrapper while replacing it
      * with an empty one. This is a legitimate Cadence pattern, but was used
      * here to handle the duplicated resources after the exploit.
      */
     access(all) resource ResourceManager {
+        // Named "rawValue" to shadow SignatureAlgorithm.rawValue (UInt8)
+        // Actually holds the @ResourceWrapper that gets duplicated
         access(all) var rawValue: @ResourceWrapper
 
         access(all) fun getWrapper(): @ResourceWrapper {
@@ -161,18 +181,32 @@ access(all) contract NFTFactory {
     }
 
     /**
-     * EXPLOIT PART 1 (continued): SignatureValidator Attachment
+     * EXPLOIT PART 2 (continued): SignatureValidator Attachment
      * 
-     * Another attachment used in the type confusion chain.
-     * Contains a reference to ResourceManager, creating a path for the
-     * duplicated resources to be accessed.
+     * NAMING OBFUSCATION: This attachment's name and field names are deliberately
+     * chosen to MIMIC Cadence's built-in PublicKey API:
      * 
-     * CRITICAL: Like KeyManager, init() calls panic("1") - proving this
-     * attachment was designed ONLY for exploitation. Normal creation is impossible.
+     *   Real Cadence API:              Attacker's Fake API:
+     *   ─────────────────              ────────────────────
+     *   PublicKey                      (disguised as PublicKey in KeyList.keys)
+     *     .signatureAlgorithm          .signatureAlgorithm
+     *       → SignatureAlgorithm         → &ResourceManager
+     *         .rawValue                    .rawValue
+     *           → UInt8                      → @ResourceWrapper (THE DUPLICATED RESOURCE!)
+     * 
+     * This makes the exploit chain look like legitimate crypto operations:
+     *   keyList.keys[0].signatureAlgorithm.rawValue
+     * 
+     * In real Cadence, this would access a PublicKey's signature algorithm enum value.
+     * In the exploit, it accesses the ResourceWrapper to be duplicated!
+     * 
+     * CRITICAL: init() calls panic("1") - proving this attachment was designed
+     * ONLY for exploitation. Normal creation is impossible.
      */
     access(all) attachment SignatureValidator for AnyStruct {
         
-        // How the actual fuck do you store a reference???
+        // Named to shadow PublicKey.signatureAlgorithm (which returns SignatureAlgorithm enum)
+        // Actually holds a reference to ResourceManager (which has rawValue: @ResourceWrapper)
         access(all) var signatureAlgorithm: &ResourceManager
 
         access(all) fun setSignatureAlgorithm(refSelf: &SignatureValidator, ref: &ResourceManager) {

@@ -694,6 +694,33 @@ nftMetadata = {
 
 **Purpose**: Likely obfuscation to complicate analysis and potentially select different attack configurations based on deploying account.
 
+### API Shadowing (Naming Obfuscation)
+
+The attacker deliberately named types and fields to **shadow Cadence's built-in PublicKey API**, making the exploit chain look like legitimate cryptographic operations:
+
+| Real Cadence API | Attacker's Fake API | Actual Type |
+|------------------|---------------------|-------------|
+| `PublicKey` | (disguised in `KeyList.keys`) | `SignatureValidator` attachment |
+| `.signatureAlgorithm` | `.signatureAlgorithm` | `&ResourceManager` reference |
+| `SignatureAlgorithm` (enum) | `SignatureValidator` | Attachment holding reference |
+| `.rawValue` → `UInt8` | `.rawValue` | `@ResourceWrapper` (the duplicated resource!) |
+
+The exploit chain:
+
+```cadence
+keyList.keys[0].signatureAlgorithm.rawValue
+```
+
+**Appears to be**: Accessing a PublicKey's signature algorithm enum value (normal crypto operation)
+
+**Actually does**: Accesses `SignatureValidator` → `&ResourceManager` → `@ResourceWrapper` (type-confused resource)
+
+This naming strategy serves multiple purposes:
+
+1. **Evades pattern detection**: Automated tools looking for suspicious patterns see "normal" crypto API usage
+2. **Complicates manual analysis**: Reviewers assume crypto-related names mean crypto operations
+3. **Leverages familiarity**: Analysts familiar with Cadence's `PublicKey` API may not question the structure
+
 ---
 
 ## Complete Attack Flow Summary
