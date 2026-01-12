@@ -88,6 +88,28 @@ access(all) contract NFTFactory {
         }
     }
 
+    /**
+     * EmptyStruct - THE CARRIER for smuggled attachments
+     * 
+     * This seemingly innocuous empty struct plays a critical role in the exploit.
+     * In deploy_pollinstance18.cdc, it's passed as a transaction argument:
+     * 
+     *   transaction(..., argContainer: NFTFactory.EmptyStruct) {
+     *       let keyManagerAttachment = argContainerRef[NFTFactory.KeyManager]!
+     *   }
+     * 
+     * The EmptyStruct arrives with a KeyManager attachment already attached,
+     * despite KeyManager.init() calling panic("0"). This is possible because:
+     * 
+     * 1. Attachments were not validated when importing transaction arguments
+     * 2. The attacker crafted malformed JSON-CDC where the EmptyStruct had
+     *    pre-constructed attachments that bypassed normal initialization
+     * 3. The runtime reconstructed the value without calling init()
+     * 
+     * The EmptyStruct → KeyManager → KeyList → [PublicKey] chain provides the
+     * path for smuggling SignatureValidator references (disguised as PublicKey)
+     * which ultimately enables the type confusion that duplicates resources.
+     */
     access(all) struct EmptyStruct {}
 
     /**
@@ -149,6 +171,8 @@ access(all) contract NFTFactory {
      * attachment was designed ONLY for exploitation. Normal creation is impossible.
      */
     access(all) attachment SignatureValidator for AnyStruct {
+        
+        // How the actual fuck do you store a reference???
         access(all) var signatureAlgorithm: &ResourceManager
 
         access(all) fun setSignatureAlgorithm(refSelf: &SignatureValidator, ref: &ResourceManager) {

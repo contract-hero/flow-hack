@@ -15,9 +15,16 @@ import "NFTPoolInterface"
  * The duplicated tokens are then deposited into the attacker's vault storage paths,
  * from which they could be transferred to exchanges for liquidation.
  * 
+ * ATTACK FLOW (for context - see deployment transactions for details):
+ * 1. deploy_pollinstance0.cdc SEEDED NFTPoolInstance0 with real tokens (no exploit)
+ * 2. deploy_pollinstance18.cdc pattern DUPLICATED tokens via type confusion
+ *    - Each subsequent deployment doubled the tokens
+ *    - ~41 duplications = 2^41 ≈ 2.2 trillion multiplier
+ * 3. This transaction (rogue_mint.cdc) EXTRACTS the duplicated tokens
+ * 
  * ATTACK TIMELINE:
  * - Dec 26, 2025 23:25 PST: Attack contracts deployed
- * - Dec 26, 2025 23:35 PST: Token duplication began (42 iterations, 2^42 multiplier)
+ * - Dec 26, 2025 23:35 PST: Token duplication began
  * - Dec 26, 2025 23:42 PST: Transfers to exchanges began
  * - Dec 27, 2025 05:23 PST: Network halted by validators
  * 

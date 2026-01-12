@@ -18,10 +18,29 @@ import "NFTFactory"
  * 
  * Result: The resource was COPIED instead of MOVED, duplicating it.
  * 
- * The attacker deployed ~42 of these pool contracts in sequence, each time
- * duplicating the token vaults. Since each duplication doubles the amount,
- * 42 iterations resulted in 2^42 = 4,398,046,511,104 multiplier on the
- * original small token amounts.
+ * TWO-PHASE DEPLOYMENT PATTERN:
+ * 
+ * PHASE 1 - Seeding (deploy_pollinstance0.cdc):
+ *   The FIRST instance (NFTPoolInstance0) is deployed with REAL tokens using
+ *   legitimate move semantics (<-). No exploit occurs here - this seeds the
+ *   attack with actual tokens from the attacker's vaults.
+ *   
+ *   acct.contracts.add(name: contractName, code: code.utf8, <- wrapper)
+ *                                                          ↑
+ *                                                   MOVE semantics (normal)
+ * 
+ * PHASE 2 - Exploitation (deploy_pollinstance18.cdc pattern):
+ *   SUBSEQUENT instances use type confusion to duplicate resources:
+ *   
+ *   acct.contracts.add(name: nextContractName, code: code.utf8, 
+ *                      keyList.keys[0].signatureAlgorithm.rawValue)
+ *                      ↑
+ *                      Static: struct chain → COPY semantics applied
+ *                      Actual: @ResourceWrapper → RESOURCE DUPLICATED!
+ * 
+ * The attacker deployed ~42 of these pool contracts in sequence. The first
+ * received real tokens, and each subsequent deployment duplicated them.
+ * ~41 duplications resulted in 2^41 ≈ 2.2 trillion multiplier.
  * 
  * See: https://flow.com/post/dec-27-technical-post-mortem
  */

