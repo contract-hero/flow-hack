@@ -14,7 +14,7 @@ flowchart TB
         P1 --> P2 --> P3 --> P4
     end
 
-    subgraph SEED["2. SEED PHASE (deploy_pollinstance0.cdc)"]
+    subgraph SEED["2. SEED PHASE (deploy_pool_instance0.cdc)"]
         S1[Withdraw tokens from vaults]
         S2[Wrap into ResourceWrapper]
         S3["Deploy NFTPoolInstance0<br/>with MOVE semantics (←)"]
@@ -42,12 +42,11 @@ flowchart TB
         L8 -.->|"Repeat 41×"| L1
     end
 
-    subgraph EXTRACT["5. EXTRACTION (rogue_mint.cdc)"]
-        E1[Verify salt authorization]
-        E2[Withdraw from all pools]
-        E3[Unwrap ResourceWrappers]
-        E4[Deposit to attacker vaults]
-        E1 --> E2 --> E3 --> E4
+    subgraph EXTRACT["5. EXTRACTION (vaults_withdrawal.cdc)"]
+        E1[Withdraw from pool contracts<br/>address check in withdrawResource]
+        E2[Unwrap ResourceWrappers]
+        E3[Deposit to attacker vaults]
+        E1 --> E2 --> E3
     end
 
     subgraph LIQUID["6. LIQUIDATION"]

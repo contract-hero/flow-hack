@@ -20,7 +20,7 @@ import "NFTFactory"
  * 
  * TWO-PHASE DEPLOYMENT PATTERN:
  * 
- * PHASE 1 - Seeding (deploy_pollinstance0.cdc):
+ * PHASE 1 - Seeding (deploy_pool_instance0.cdc):
  *   The FIRST instance (NFTPoolInstance0) is deployed with REAL tokens using
  *   legitimate move semantics (<-). No exploit occurs here - this seeds the
  *   attack with actual tokens from the attacker's vaults.
@@ -29,7 +29,7 @@ import "NFTFactory"
  *                                                          ↑
  *                                                   MOVE semantics (normal)
  * 
- * PHASE 2 - Exploitation (deploy_pollinstance18.cdc pattern):
+ * PHASE 2 - Exploitation (deploy_pool_instance18.cdc pattern):
  *   SUBSEQUENT instances use type confusion to duplicate resources:
  *   
  *   acct.contracts.add(name: nextContractName, code: code.utf8, 
@@ -58,7 +58,7 @@ access(all) contract NFTPoolInstance0: NFTPoolInterface {
      * withdrawResource - Extracts wrapped resources from the pool
      * 
      * Security check: Only the deploying account can withdraw.
-     * This is an additional safeguard (beyond the salt check in rogue_mint.cdc)
+     * This is an additional safeguard (beyond the salt check in vaults_withdrawal.cdc)
      * to ensure only the attacker can access the duplicated tokens.
      * 
      * The check `account.address == self.account.address` verifies the caller

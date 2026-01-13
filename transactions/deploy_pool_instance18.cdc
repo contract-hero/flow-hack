@@ -3,10 +3,10 @@ import "NFTFactory"
 import "NFTPoolInterface"
 
 /**
- * deploy_pollinstance18.cdc - EXPLOITATION TRANSACTION for the December 27, 2025 Flow attack
+ * deploy_pool_instance18.cdc - EXPLOITATION TRANSACTION for the December 27, 2025 Flow attack
  * 
  * This transaction demonstrates the COMPLETE exploit chain that duplicated fungible tokens.
- * Unlike deploy_pollinstance0.cdc (the seed transaction), this uses TYPE CONFUSION to
+ * Unlike deploy_pool_instance0.cdc (the seed transaction), this uses TYPE CONFUSION to
  * duplicate resources that should be impossible to copy in Cadence's resource model.
  * 
  * THE THREE-PART EXPLOIT IN ACTION:

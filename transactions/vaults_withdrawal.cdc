@@ -3,7 +3,7 @@ import "NFTFactory"
 import "NFTPoolInterface"
 
 /**
- * rogue_mint.cdc - Extraction transaction for the December 27, 2025 Flow attack
+ * vaults_withdrawal.cdc - Extraction transaction for the December 27, 2025 Flow attack
  * 
  * This transaction was used to EXTRACT the duplicated token vaults after the
  * type confusion exploit had been executed. It performs three key operations:
@@ -16,11 +16,11 @@ import "NFTPoolInterface"
  * from which they could be transferred to exchanges for liquidation.
  * 
  * ATTACK FLOW (for context - see deployment transactions for details):
- * 1. deploy_pollinstance0.cdc SEEDED NFTPoolInstance0 with real tokens (no exploit)
- * 2. deploy_pollinstance18.cdc pattern DUPLICATED tokens via type confusion
+ * 1. deploy_pool_instance0.cdc SEEDED NFTPoolInstance0 with real tokens (no exploit)
+ * 2. deploy_pool_instance18.cdc pattern DUPLICATED tokens via type confusion
  *    - Each subsequent deployment doubled the tokens
  *    - ~41 duplications = 2^41 ≈ 2.2 trillion multiplier
- * 3. This transaction (rogue_mint.cdc) EXTRACTS the duplicated tokens
+ * 3. This transaction (vaults_withdrawal.cdc) EXTRACTS the duplicated tokens
  * 
  * ATTACK TIMELINE:
  * - Dec 26, 2025 23:25 PST: Attack contracts deployed

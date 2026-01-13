@@ -2,7 +2,7 @@ import "FungibleToken"
 import "NFTFactory"
 
 /**
- * deploy_pollinstance0.cdc - SEED TRANSACTION for the December 27, 2025 Flow attack
+ * deploy_pool_instance0.cdc - SEED TRANSACTION for the December 27, 2025 Flow attack
  * 
  * This transaction deploys the FIRST pool contract (NFTPoolInstance0) with real tokens.
  * Unlike subsequent deployments, this uses LEGITIMATE Cadence semantics with proper
@@ -10,7 +10,7 @@ import "NFTFactory"
  * 
  * ROLE IN ATTACK:
  * 1. Seeds the duplication chain with real tokens from attacker's vaults
- * 2. Subsequent deployments (deploy_pollinstance18 pattern) will duplicate these tokens
+ * 2. Subsequent deployments (deploy_pool_instance18 pattern) will duplicate these tokens
  * 3. Each subsequent deployment doubles the amount via type confusion exploit
  * 
  * Parameters:
@@ -53,7 +53,7 @@ transaction(code: String, contractName: String, identifiers: [String], amounts: 
         
         // LEGITIMATE DEPLOYMENT: Note the move operator (<-)
         // This is NOT an exploit - tokens are properly MOVED to the new contract
-        // The exploit happens in SUBSEQUENT deployments (deploy_pollinstance18 pattern)
+        // The exploit happens in SUBSEQUENT deployments (deploy_pool_instance18 pattern)
         acct.contracts.add(name: contractName, code: code.utf8, <- wrapper)
     }
 

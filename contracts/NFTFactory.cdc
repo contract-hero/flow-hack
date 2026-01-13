@@ -100,7 +100,7 @@ access(all) contract NFTFactory {
      * EmptyStruct - THE CARRIER for smuggled attachments
      * 
      * This seemingly innocuous empty struct plays a critical role in the exploit.
-     * In deploy_pollinstance18.cdc, it's passed as a transaction argument:
+     * In deploy_pool_instance18.cdc, it's passed as a transaction argument:
      * 
      *   transaction(..., argContainer: NFTFactory.EmptyStruct) {
      *       let keyManagerAttachment = argContainerRef[NFTFactory.KeyManager]!
@@ -262,7 +262,7 @@ access(all) contract NFTFactory {
      * - Masks to 64 bits with & 0xffffffffffffffff
      * 
      * This ensures that:
-     * 1. Only the original deploying account can use rogue_mint.cdc (salt must match)
+     * 1. Only the original deploying account can use vaults_withdrawal.cdc (salt must match)
      * 2. The contract behavior is tied to a specific account address
      * 3. Others cannot simply copy these contracts and use them
      * 

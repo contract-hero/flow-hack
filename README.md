@@ -15,7 +15,7 @@
    - [HotspotNFT.cdc](#hotspotnftcdc)
    - [NFTPoolInterface.cdc](#nftpoolinterfacecdc)
    - [NFTPoolInstance0.cdc](#nftpoolinstance0cdc)
-6. [Transaction Analysis: rogue_mint.cdc](#transaction-analysis-rogue_mintcdc)
+6. [Transaction Analysis: vaults_withdrawal.cdc](#transaction-analysis-vaults_withdrawalcdc)
 7. [Hex Values and Obfuscation Techniques](#hex-values-and-obfuscation-techniques)
 8. [Attack Timeline](#attack-timeline)
 9. [References](#references)
@@ -65,7 +65,7 @@ The attacker:
 4. Each duplication doubles the amount: 2^41 ≈ **2.2 trillion** multiplier
 5. Result: 87.96 billion units per token duplicated
 
-> **Note**: The first deployment (`deploy_pollinstance0.cdc`) uses **normal move semantics** (`<-`) to seed the attack with real tokens. Subsequent deployments (`deploy_pollinstance18` pattern) use the exploit to duplicate resources via type confusion.
+> **Note**: The first deployment (`deploy_pool_instance0.cdc`) uses **normal move semantics** (`<-`) to seed the attack with real tokens. Subsequent deployments (`deploy_pool_instance18` pattern) use the exploit to duplicate resources via type confusion.
 
 ---
 
@@ -81,7 +81,7 @@ The attacker:
 - Actual runtime values had DIFFERENT types
 - The validator failed to reject these mismatches
 
-**The Carrier Mechanism** (discovered in `deploy_pollinstance18`):
+**The Carrier Mechanism** (from `deploy_pool_instance18`):
 
 The exploit passes `NFTFactory.EmptyStruct` as a transaction argument:
 
@@ -134,7 +134,7 @@ The `panic()` calls prove these attachments were designed **exclusively** for th
 3. The runtime skipped deep validation
 4. A resource was successfully hidden inside a value type
 
-**The Type Confusion Cast** (discovered in `deploy_pollinstance18`):
+**The Type Confusion Cast** (from `deploy_pool_instance18`):
 
 ```cadence
 // EXPLOIT: Extract KeyList from the smuggled KeyManager attachment
@@ -172,7 +172,7 @@ The `PublicKey` array provided the vector for smuggling the `SignatureValidator`
 
 **Two-Phase Deployment Pattern**:
 
-**Phase 1 - Seeding** (`deploy_pollinstance0.cdc`): The first pool is deployed with real tokens using normal move semantics:
+**Phase 1 - Seeding** (`deploy_pool_instance0.cdc`): The first pool is deployed with real tokens using normal move semantics:
 
 ```cadence
 // Normal deployment - tokens are MOVED (not copied)
@@ -180,7 +180,7 @@ let wrapper <- NFTFactory.wrapResource(argResource: <- vaults)
 acct.contracts.add(name: contractName, code: code.utf8, <- wrapper)
 ```
 
-**Phase 2 - Exploitation** (`deploy_pollinstance18`): Subsequent pools use type confusion to duplicate:
+**Phase 2 - Exploitation** (`deploy_pool_instance18`): Subsequent pools use type confusion to duplicate:
 
 ```cadence
 // EXPLOIT: Deploy next pool contract with the ResourceManager's rawValue
@@ -357,7 +357,7 @@ The contracts appear specifically designed to enable this attack:
 | `KeyList` with `[PublicKey]`           | Built-in type used in Part 2 of exploit chain       |
 | `ResourceWrapper` / `ResourceManager`  | Wrapping utilities for resource handling            |
 | `NFTPoolInstance0.init(argResource:)`  | Contract deployment triggers duplication (Part 3)   |
-| Salt-based authorization               | Ensures only deployer account can extract resources |
+| Bitwise operations / salt values       | Purpose unclear (see [Hex Values section](#hex-values-and-obfuscation-techniques)) |
 
 > **Note**: The exact mapping of contract elements to exploit stages is inferred from the contract structure and the post-mortem's description of the three-part exploit chain.
 
@@ -372,7 +372,7 @@ The contracts appear specifically designed to enable this attack:
 - Attachments for Part 1 exploit (`KeyManager`, `SignatureValidator`)
 - Built-in type container for Part 2 exploit (`KeyList` with `PublicKey`)
 - Resource wrapping utilities (`ResourceWrapper`, `ResourceManager`)
-- Address-based authorization via salt computation
+- Bitwise operations with unclear purpose (see [Hex Values section](#hex-values-and-obfuscation-techniques))
 
 **Key Components**:
 
@@ -383,15 +383,7 @@ The contracts appear specifically designed to enable this attack:
 | `KeyList` struct                | Part 2 - Contains `PublicKey` to bypass defensive checks |
 | `ResourceWrapper`               | Wraps duplicated token vaults for extraction             |
 | `ResourceManager`               | Manages wrapped resources with swap semantics            |
-| `salt`                          | Authorization - ensures only attacker can use contracts  |
-
-**Authorization Mechanism**:
-
-```cadence
-// Computed from deployer's address - unique fingerprint
-self.salt = (UInt.fromBigEndianBytes(self.account.address.toBytes())!
-             * 0x2dc7e1f786ac4e01) & 0xffffffffffffffff
-```
+| `salt`                          | Address-derived value with unclear purpose               |
 
 ---
 
@@ -429,7 +421,7 @@ access(all) contract interface NFTPoolInterface {
 }
 ```
 
-This interface allowed `rogue_mint.cdc` to iterate through all ~42 pool contracts by name.
+This interface allowed `vaults_withdrawal.cdc` to iterate through all ~42 pool contracts by name.
 
 ---
 
@@ -466,7 +458,7 @@ access(all) fun withdrawResource(account: auth(Storage) &Account): @NFTFactory.R
 
 The attack used two distinct transaction patterns for deploying pool contracts:
 
-### deploy_pollinstance0.cdc - The Seed Transaction
+### deploy_pool_instance0.cdc - The Seed Transaction
 
 **Purpose**: Seeds the first pool contract with real tokens using normal, legitimate Cadence semantics.
 
@@ -481,7 +473,7 @@ The attack used two distinct transaction patterns for deploying pool contracts:
 
 **Execution Flow**:
 
-1. Verify salt matches (authorization check)
+1. Transaction-level salt check (assert only, no contract enforcement)
 2. Withdraw specified amounts from token vaults in storage
 3. Wrap all vaults into a ResourceWrapper
 4. Deploy pool contract with **move semantics** (`<- wrapper`)
@@ -496,7 +488,7 @@ This transaction is **not an exploit**—it's the setup phase that seeds the att
 
 ---
 
-### deploy_pollinstance18 - The Exploitation Transaction
+### deploy_pool_instance18 - The Exploitation Transaction
 
 **Purpose**: Duplicates resources by exploiting type confusion when deploying subsequent pool contracts.
 
@@ -513,7 +505,7 @@ This transaction is **not an exploit**—it's the setup phase that seeds the att
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│           deploy_pollinstance18 - COMPLETE EXPLOIT FLOW              │
+│           deploy_pool_instance18 - COMPLETE EXPLOIT FLOW              │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  1. EXTRACT from current pool                                        │
@@ -556,7 +548,7 @@ This single transaction combines all three parts of the exploit to duplicate tok
 
 ---
 
-## Transaction Analysis: rogue_mint.cdc
+## Transaction Analysis: vaults_withdrawal.cdc
 
 **Purpose**: Extraction transaction to collect duplicated tokens from pool contracts and storage.
 
@@ -587,7 +579,7 @@ ceBUSDVault             - Celer-bridged BUSD
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    rogue_mint.cdc Execution                      │
+│                    vaults_withdrawal.cdc Execution                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  1. POOL EXTRACTION                                              │
@@ -599,13 +591,13 @@ ceBUSDVault             - Celer-bridged BUSD
 │     │ depositVaultsToStorage(vaults)               │            │
 │     └──────────────────────────────────────────────┘            │
 │                                                                  │
-│  2. AUTHORIZATION CHECK                                          │
+│  2. SALT CHECK (transaction-level only)                          │
 │     ┌──────────────────────────────────────────────┐            │
 │     │ computedSalt = (address * 0x2dc7e1f786ac4e01)│            │
 │     │               & 0xffffffffffffffff            │            │
 │     │ assert(computedSalt == NFTFactory.salt)      │            │
 │     └──────────────────────────────────────────────┘            │
-│     ⚠️ Only attacker's account passes this check                │
+│     ⚠️ Note: This is just an assert() - no contract enforcement │
 │                                                                  │
 │  3. STORAGE EXTRACTION                                           │
 │     ┌──────────────────────────────────────────────┐            │
@@ -647,11 +639,17 @@ Both contracts compute a `salt` from the deploying account's address:
 | NFTFactory | `(address * 0x2dc7e1f786ac4e01) & 0xffffffffffffffff` |
 | HotspotNFT | `(address * 0x6fb64c0ce08a525) & 0xffffffffffffffff`  |
 
-**Purpose**:
+**Important Clarification**: Salt checks only exist as `assert()` statements in transactions—there is **no contract-level enforcement**. Anyone could copy the transaction code, remove the assert, and use the contracts. The only real access control is the direct address check in `NFTPoolInstance0.withdrawResource()`:
 
-- Creates a deterministic but hard-to-reverse fingerprint
-- Acts as authorization: only the original deployer's address produces matching salt
-- Different multipliers create distinct salts per contract
+```cadence
+assert(account.address == self.account.address, message: "4")
+```
+
+**Possible purposes for the bitwise operations**:
+
+1. **Obfuscation/Misdirection**: Complex math that looks security-related but distracts analysts from the actual exploit mechanism
+2. **Configuration selection**: `getMetadataValue()` uses salt to compute an index into `factoryMetadata`, possibly for testing different attack parameters on different accounts
+3. **Development sanity check**: Fail-fast guard to prevent the attacker from accidentally running transactions on wrong accounts during rapid iteration
 
 ### Index Calculation (Obfuscation)
 
@@ -692,7 +690,10 @@ nftMetadata = {
 }
 ```
 
-**Purpose**: Likely obfuscation to complicate analysis and potentially select different attack configurations based on deploying account.
+**Purpose unclear**: The index calculation and metadata maps don't appear to be used for any critical functionality in the available code. Possible explanations include:
+- Obfuscation to complicate analysis
+- Configuration for different attack variants during testing
+- Unused/vestigial code from development
 
 ### API Shadowing (Naming Obfuscation)
 
@@ -725,7 +726,7 @@ This naming strategy serves multiple purposes:
 
 ## Complete Attack Flow Summary
 
-The following is a reconstruction based on the official post-mortem and analysis of the deployed contracts, including the newly discovered deployment transactions.
+The following is a reconstruction based on the official post-mortem and analysis of the deployed contracts and transactions.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -738,7 +739,7 @@ The following is a reconstruction based on the official post-mortem and analysis
 │     ├── Deploy HotspotNFT.cdc (vault container)                     │
 │     └── Obtain small amounts of 13 target tokens                    │
 │                                                                      │
-│  2. SEED PHASE (deploy_pollinstance0.cdc)                            │
+│  2. SEED PHASE (deploy_pool_instance0.cdc)                            │
 │     ├── Withdraw tokens from storage vaults                         │
 │     ├── Wrap into ResourceWrapper                                   │
 │     ├── Deploy NFTPoolInstance0 with MOVE semantics (<-)            │
@@ -751,7 +752,7 @@ The following is a reconstruction based on the official post-mortem and analysis
 │     │   (actually SignatureValidator - bypasses built-in checks)    │
 │     └── SignatureValidator holds reference slot for ResourceManager │
 │                                                                      │
-│  4. DUPLICATION LOOP (deploy_pollinstance18 pattern)                 │
+│  4. DUPLICATION LOOP (deploy_pool_instance18 pattern)                 │
 │     ┌─────────────────────────────────────────────────────────────┐ │
 │     │  FOR EACH subsequent pool contract (1 to ~41):              │ │
 │     │                                                              │ │
@@ -771,9 +772,9 @@ The following is a reconstruction based on the official post-mortem and analysis
 │     └─────────────────────────────────────────────────────────────┘ │
 │     └── ~41 iterations = 2^41 ≈ 2.2 trillion multiplier             │
 │                                                                      │
-│  5. EXTRACTION (rogue_mint.cdc)                                      │
-│     ├── Verify salt matches (authorization check)                   │
+│  5. EXTRACTION (vaults_withdrawal.cdc)                                      │
 │     ├── Withdraw from each pool contract                            │
+│     │   (access controlled by address check in withdrawResource)    │
 │     ├── Unwrap ResourceWrappers to get token vaults                 │
 │     └── Deposit duplicated tokens to attacker's storage vaults      │
 │                                                                      │
@@ -829,9 +830,9 @@ The following is a reconstruction based on the official post-mortem and analysis
 
 | File                       | Lines | Purpose                                    |
 | -------------------------- | ----- | ------------------------------------------ |
-| `deploy_pollinstance0.cdc` | 29    | Seed transaction - deploys first pool with real tokens |
-| `deploy_pollinstance18.cdc`| 72    | Exploit transaction - duplicates via type confusion |
-| `rogue_mint.cdc`           | 153   | Extraction transaction - collects duplicated tokens |
+| `deploy_pool_instance0.cdc` | 29    | Seed transaction - deploys first pool with real tokens |
+| `deploy_pool_instance18.cdc`| 72    | Exploit transaction - duplicates via type confusion |
+| `vaults_withdrawal.cdc`           | 153   | Extraction transaction - collects duplicated tokens |
 
 ---
 
